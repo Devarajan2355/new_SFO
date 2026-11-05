@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="guard_service_description">Sanya Focus Guard blocks YouTube Shorts and enforces the daily app limits you set. It only checks which app is open and which YouTube screen is showing. It never stores page content, and nothing leaves your phone.</string>
+</resources>

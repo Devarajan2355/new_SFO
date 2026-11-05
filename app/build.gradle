@@ -1,0 +1,82 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// ---------------------------------------------------------------------------
+// Signing. The key and passwords come ONLY from the environment (GitHub secrets
+// in CI). There is no password in this file any more. If anything is missing the
+// build is simply left unsigned for Gradle; the CI workflow refuses to run
+// without the secrets, so you never get an APK signed with the wrong key.
+// ---------------------------------------------------------------------------
+def keystoreFile = file('sanya.keystore')
+def keystorePassword = System.getenv('SANYA_KEYSTORE_PASSWORD')
+def keyPasswordValue = System.getenv('SANYA_KEY_PASSWORD')
+def keyAliasValue = System.getenv('SANYA_KEY_ALIAS') ?: 'sanya'
+def canSign = keystoreFile.exists() && keystorePassword && keyPasswordValue
+
+android {
+    namespace 'com.sanya.assistant'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.sanya.assistant'
+        minSdk 26
+        targetSdk 28   // 28 (not 29+) so Wi-Fi can be switched directly
+        versionCode 8
+        versionName '7.2'
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
+    }
+
+    signingConfigs {
+        sanya {
+            if (canSign) {
+                storeFile keystoreFile
+                storePassword keystorePassword
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+            }
+        }
+    }
+
+    buildTypes {
+        // Same key as release, so you can install either one over the other.
+        debug {
+            if (canSign) {
+                signingConfig signingConfigs.sanya
+            }
+        }
+
+        // The one to use every day: optimised code, unused code removed.
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (canSign) {
+                signingConfig signingConfigs.sanya
+            }
+        }
+    }
+
+    // targetSdk 28 is deliberate, so Lint's "old target SDK" complaint must not stop a release build.
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
+
+dependencies {
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
+    implementation 'com.alphacephei:vosk-android:0.3.47'
+    testImplementation 'junit:junit:4.13.2'
+}

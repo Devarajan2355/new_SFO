@@ -523,7 +523,75 @@ object Guard {
 
         return "Okay. The " + cap(hit.label) + " limit is gone."
     }
+    // ---------------------------------------------------------------
+    // Schedules: an app is closed between two times of day
+    // ---------------------------------------------------------------
 
+    fun schedules(ctx: Context): List<GuardSchedule.Rule> =
+        GuardSchedule.decode(p(ctx).getString("sched", "") ?: "")
+
+    private fun saveSchedules(ctx: Context, l: List<GuardSchedule.Rule>) {
+        p(ctx).edit().putString("sched", GuardSchedule.encode(l)).apply()
+    }
+
+    /** The rule that closes the app with this package right now, or null. */
+    fun scheduleFor(ctx: Context, pkg: String, nowMin: Int): GuardSchedule.Rule? {
+
+        val rules = schedules(ctx)
+        if (rules.isEmpty()) return null
+
+        val label = apps(ctx).firstOrNull { it.pkg == pkg }?.label ?: return null
+
+        return GuardSchedule.blocked(rules, label, nowMin)
+    }
+
+    private fun setSchedule(ctx: Context, spoken: String, s: Int, e: Int): String {
+
+        val app = findApp(ctx, spoken) ?: return "I can't find an app called $spoken."
+
+        if (app.pkg == ctx.packageName) return "I won't block myself."
+
+        val rule = GuardSchedule.Rule(app.label, s, e)
+        val all = schedules(ctx)
+        val old = all.firstOrNull { it.label == app.label }
+
+        if (old == rule) return GuardSchedule.text(rule) + " already."
+
+        // A window that leaves any minute open that was closed loosens the rule: it waits.
+        if (old != null && GuardSchedule.loosens(old, rule)) {
+            gate(ctx, "sched:" + app.label + ":" + s + "-" + e, "change the " + cap(app.label) + " block")
+                ?.let { return it }
+        }
+
+        saveSchedules(ctx, all.filter { it.label != app.label } + rule)
+
+        return "Okay. " + GuardSchedule.text(rule) + "." + serviceNote(ctx)
+    }
+
+    private fun removeSchedule(ctx: Context, spoken: String): String {
+
+        val all = schedules(ctx)
+        val q = Brain.clean(spoken)
+
+        val hit = all.firstOrNull { it.label == q }
+            ?: findApp(ctx, spoken)?.let { a -> all.firstOrNull { it.label == a.label } }
+            ?: return "There's no schedule for $spoken."
+
+        gate(ctx, "sched-rm:" + hit.label, "remove the " + cap(hit.label) + " schedule")?.let { return it }
+
+        saveSchedules(ctx, all.filter { it.label != hit.label })
+
+        return "Okay. The " + cap(hit.label) + " schedule is gone."
+    }
+
+    private fun scheduleListText(ctx: Context): String {
+
+        val l = schedules(ctx)
+
+        if (l.isEmpty()) return "No apps are scheduled. Say, for example: block instagram from 10 pm to 6 am."
+
+        return l.joinToString(". ") { GuardSchedule.text(it) } + "."
+    }
     // ---------------------------------------------------------------
     // The adult word filter and your own words
     // ---------------------------------------------------------------
@@ -644,6 +712,7 @@ object Guard {
         if (!wasActive) {
             bump(ctx, "urges")
             GuardLog.note(ctx, "urge")
+            GuardLog.noteUrgeHour(ctx)
             GuardCare.closeWindow(ctx)
         }
 
@@ -798,7 +867,8 @@ object Guard {
                 } + "."
             )
         }
-
+        val sc = schedules(ctx)
+        if (sc.isNotEmpty()) parts.add("Scheduled blocks: " + sc.joinToString(", ") { GuardSchedule.text(it) } + ".")
         pendingText(ctx)?.let { parts.add(it) }
 
         return parts.joinToString(" ")
@@ -848,6 +918,10 @@ object Guard {
         GuardParse.Cmd.Urge -> startUrge(ctx)
         GuardParse.Cmd.UrgeStatus -> urgeStatusText(ctx)
         GuardParse.Cmd.UrgeEnd -> urgeEndText(ctx)
+        is GuardParse.Cmd.SetSchedule -> setSchedule(ctx, c.app, c.start, c.end)
+        is GuardParse.Cmd.RemoveSchedule -> removeSchedule(ctx, c.app)
+        GuardParse.Cmd.ScheduleList -> scheduleListText(ctx)
+        GuardParse.Cmd.UrgePattern -> GuardPattern.text(GuardLog.urgeHours(ctx))
         GuardParse.Cmd.Report,
         GuardParse.Cmd.SendReport,
         is GuardParse.Cmd.Partner,

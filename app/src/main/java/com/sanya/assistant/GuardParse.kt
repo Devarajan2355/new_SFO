@@ -39,6 +39,10 @@ object GuardParse {
         object Status : Cmd()
         object Show : Cmd()
         object CancelRequest : Cmd()
+        data class SetSchedule(val app: String, val start: Int, val end: Int) : Cmd()
+        data class RemoveSchedule(val app: String) : Cmd()
+        object ScheduleList : Cmd()
+        object UrgePattern : Cmd()
         object Report : Cmd()
         object SendReport : Cmd()
         data class Partner(val name: String) : Cmd()
@@ -187,6 +191,19 @@ object GuardParse {
     private val DNS_OFF = Regex(
         """^(?:stop watching|unwatch) my private dns$|^(?:turn off|disable) (?:the )?dns watch$"""
     )
+    private val SCHED_SET = Regex("""^block (.+?) (?:from|between) (.+?) (?:to|till|until|and) (.+)$""")
+    private val SCHED_RM = Regex("""^(?:remove|delete|stop) (?:the |my )?(.+?) (?:schedule|night block)$""")
+    private val SCHED_LIST = Regex(
+        """^(?:what|which) apps (?:are )?(?:scheduled|blocked at night)$|^(?:list|show|read|tell me)(?: me)?(?: my)? (?:app )?schedules$"""
+    )
+    private val URGE_WHEN = Regex(
+        """^when do i (?:get|have) (?:my )?urges$|^(?:what is|what's|whats|show|tell me) my urge pattern$"""
+    )
+
+    private fun minutesOf(clock: String?): Int? {
+        if (clock == null) return null
+        return clock.substring(0, 2).toInt() * 60 + clock.substring(3, 5).toInt()
+    }
     private val NOT_A_NAME = setOf("is", "to", "as", "a", "an", "the", "my", "who", "what", "it", "that")
     /** Lower case, polite filler ("can you", "please", "now" ...) removed. */
     fun norm(raw: String): String =
@@ -255,7 +272,23 @@ object GuardParse {
 
         val unblock = UNBLOCK_A.matchEntire(t) ?: UNBLOCK_B.matchEntire(t)
         if (unblock != null) return Cmd.UnblockWord(unblock.groupValues[2].trim(), isSite(unblock.groupValues[1]))
+        if (SCHED_LIST.matches(t)) return Cmd.ScheduleList
+        if (URGE_WHEN.matches(t)) return Cmd.UrgePattern
 
+        SCHED_SET.matchEntire(t)?.let { m ->
+            val s = minutesOf(Mind.parseClock(m.groupValues[2]))
+            val e = minutesOf(Mind.parseClock(m.groupValues[3]))
+            val app = tidy(m.groupValues[1])
+            if (s != null && e != null && app.isNotEmpty() && app !in NOT_AN_APP) {
+                return if (s == e) {
+                    Cmd.Say("Those two times are the same. Say, for example: block instagram from 10 pm to 6 am.")
+                } else {
+                    Cmd.SetSchedule(app, s, e)
+                }
+            }
+        }
+
+        SCHED_RM.matchEntire(t)?.let { m -> return Cmd.RemoveSchedule(tidy(m.groupValues[1])) }
         val rm = REMOVE_A.matchEntire(t) ?: REMOVE_B.matchEntire(t)
         if (rm != null) return Cmd.RemoveLimit(tidy(rm.groupValues[1]))
 

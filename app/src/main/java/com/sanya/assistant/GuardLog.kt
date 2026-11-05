@@ -44,7 +44,19 @@ object GuardLog {
             ErrorLog.add(ctx, "Guard log", e)
         }
     }
+    fun urgeHours(ctx: Context): IntArray = GuardPattern.decode(p(ctx).getString("urge_hours", "") ?: "")
 
+    /** One more urge at this hour of the day. Only the hour is kept. */
+    @Synchronized
+    fun noteUrgeHour(ctx: Context, hour: Int = java.time.LocalTime.now().hour) {
+
+        try {
+            val next = GuardPattern.bump(urgeHours(ctx), hour)
+            p(ctx).edit().putString("urge_hours", GuardPattern.encode(next)).apply()
+        } catch (e: Throwable) {
+            ErrorLog.add(ctx, "Guard urge hours", e)
+        }
+    }
     @Synchronized
     fun beat(ctx: Context, now: Long) {
 

@@ -374,10 +374,30 @@ class GuardService : AccessibilityService() {
 
         return true
     }
+    // A scheduled app is closed between its two times. True if it sent you Home.
+    private fun enforceSchedule(pkg: String): Boolean {
 
+        val c = java.util.Calendar.getInstance()
+        val nowMin = c.get(java.util.Calendar.HOUR_OF_DAY) * 60 + c.get(java.util.Calendar.MINUTE)
+
+        val rule = Guard.scheduleFor(this, pkg, nowMin) ?: return false
+
+        val now = System.currentTimeMillis()
+        if (now - lastKick < KICK_GAP_MS) return true
+        lastKick = now
+
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        Guard.noteBlock(this)
+        toast(rule.label.replaceFirstChar { it.uppercase() } + " is blocked until " +
+            ReminderParse.clock12(rule.end) + ".")
+        GuardLog.note(this, "limit")
+
+        return true
+    }
     private fun enforce(pkg: String) {
 
         if (enforceUrge(pkg)) return
+        if (enforceSchedule(pkg)) return
 
         val lim = Guard.limitFor(this, pkg) ?: return
 

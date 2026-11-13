@@ -113,7 +113,7 @@ object Guard {
 
         val now = System.currentTimeMillis()
 
-        if (appCache.isNotEmpty() && now - appCacheAt < 5 * MINUTE_MS) return appCache
+        if (appCache.isNotEmpty() && now - appCacheAt < 30 * MINUTE_MS) return appCache
 
         val list = try {
             val pm = ctx.packageManager

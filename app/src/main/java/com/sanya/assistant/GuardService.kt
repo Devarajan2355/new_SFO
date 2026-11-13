@@ -43,14 +43,14 @@ class GuardService : AccessibilityService() {
         @Volatile var alive = false
 
         private const val TICK_MS = 15_000L
-        private const val SCAN_GAP_MS = 700L
-        private const val DEEP_GAP_MS = 2_500L
+        private const val SCAN_GAP_MS = 1_000L
+        private const val DEEP_GAP_MS = 4_000L
         private const val KICK_GAP_MS = 1_500L
         private const val ESCALATE_WINDOW_MS = 12_000L
         private const val MAX_ADD_MS = 180_000L
-        private const val MAX_NODES = 500
-        private const val WORD_GAP_MS = 1_500L
-        private const val WORD_NODES = 350
+        private const val MAX_NODES = 300
+        private const val WORD_GAP_MS = 2_500L
+        private const val WORD_NODES = 250
         private const val URGE_TICK_MS = 4_000L
     }
 
@@ -514,6 +514,8 @@ class GuardService : AccessibilityService() {
                 seen++
                 visit(n)
                 for (i in 0 until n.childCount) {
+                    // Never fetch more elements than we will look at: each one is a call into the other app.
+                    if (seen + queue.size >= limit) break
                     val c = n.getChild(i) ?: continue
                     queue.addLast(c)
                 }

@@ -3525,10 +3525,10 @@ object KnowledgeStore {
             if (targetTokens.size < 2) {
                 return@runCatching null
             }
-
             var best: Entry? = null
             var bestScore = 0.0
-
+            val maxAge = ageLimit(normalized)      // worked out once, not once per saved answer
+            val nowMs = System.currentTimeMillis()
             for ((key, value) in prefs.all) {
                 if (!key.startsWith(Q_PREFIX)) continue
 
@@ -3543,13 +3543,7 @@ object KnowledgeStore {
                         T_PREFIX + id,
                         0L
                     )
-
-                if (
-                    answer.isBlank() ||
-                    !isFresh(normalized, timestamp) ||
-                    !WebSearch.isUsableAnswer(normalized, answer)
-                ) continue
-
+                if (answer.isBlank() || timestamp <= 0L || nowMs - timestamp > maxAge) continue
                 val storedTokens =
                     importantTokens(storedQuestion)
 
@@ -3588,8 +3582,10 @@ object KnowledgeStore {
                 // at least two-thirds token coverage in total. This allows
                 // practical variants such as "what city is the capital of
                 // America" to reuse "what is the capital of America".
-                if (score >= 1.0 && coverage >= 0.66 && score > bestScore) {
-                    bestScore = score
+                // The slow answer check only runs for an entry that would actually win.
+                if (score >= 1.0 && coverage >= 0.66 && score > bestScore &&
+                    WebSearch.isUsableAnswer(normalized, answer)
+                ) {                    bestScore = score
                     best = Entry(
                         storedQuestion,
                         answer,
@@ -3651,7 +3647,8 @@ object KnowledgeStore {
                     System.currentTimeMillis()
                 )
                 .apply()
-        }
+
+            trimCache(prefs)        }
     }
 
     private fun isFresh(
@@ -3681,22 +3678,44 @@ object KnowledgeStore {
 
         return System.currentTimeMillis() - timestamp <= maxAge
     }
+    private const val MAX_ENTRIES = 300
 
-    private fun idFor(value: String): String {
-        val digest =
-            MessageDigest.getInstance("SHA-256")
-                .digest(
-                    value.toByteArray(Charsets.UTF_8)
-                )
+    private fun ageLimit(question: String): Long {
 
-        return Base64.encodeToString(
-            digest,
-            Base64.URL_SAFE or
-                Base64.NO_WRAP or
-                Base64.NO_PADDING
-        )
+        val dynamic =
+            IntentEngine.isTimeSensitiveQuestion(question.lowercase(Locale.getDefault()))
+
+        return if (dynamic) {
+            12L * 60L * 60L * 1000L
+        } else {
+            30L * 24L * 60L * 60L * 1000L
+        }
     }
 
+    // Keeps only the newest MAX_ENTRIES answers. Your existing cache is cut down the first time a
+    // new answer is saved. (Answers you taught her live in the Brain file, not here.)
+    private fun trimCache(prefs: android.content.SharedPreferences) {
+
+        val all = prefs.all
+
+        val ids = all.keys
+            .filter { it.startsWith(Q_PREFIX) }
+            .map { it.removePrefix(Q_PREFIX) }
+
+        if (ids.size <= MAX_ENTRIES) return
+
+        val oldestFirst = ids.sortedBy { (all[T_PREFIX + it] as? Long) ?: 0L }
+
+        val ed = prefs.edit()
+
+        for (id in oldestFirst.take(ids.size - MAX_ENTRIES)) {
+            ed.remove(Q_PREFIX + id).remove(A_PREFIX + id).remove(T_PREFIX + id)
+        }
+
+        ed.apply()
+    }
+
+    private fun idFor(value: String): String {
     private fun importantTokens(
         question: String
     ): Set<String> {

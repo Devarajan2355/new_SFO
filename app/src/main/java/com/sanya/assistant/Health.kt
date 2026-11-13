@@ -446,7 +446,34 @@ object Health {
         if (freeMb >= 0 && freeMb < 200) {
             out.add(Check("Setup", "Storage", "Only $freeMb MB free. Voices and her memory need some space.", Level.WARN))
         }
+        // ---- Performance ----
 
+        try {
+            val mi = android.os.Debug.MemoryInfo()
+            android.os.Debug.getMemoryInfo(mi)
+
+            val ramMb = mi.totalPss / 1024
+            val cached = ctx.getSharedPreferences("sanya_knowledge_v3", Context.MODE_PRIVATE).all.size / 3
+
+            val big = listOf(
+                "brain.txt", "mind.log", "money.log", "time.log", "routine.log",
+                "learner.txt", "lists.txt", "errors.log", "reminders.txt"
+            )
+                .map { it to File(ctx.filesDir, it).length() / 1024 }
+                .filter { it.second >= 100 }
+                .joinToString(", ") { it.first + " " + it.second + " KB" }
+
+            out.add(
+                Check(
+                    "Performance", "Memory",
+                    "Sanya is using about $ramMb MB of RAM (the offline voice alone takes a few hundred). " +
+                        "Saved web answers: $cached." +
+                        (if (big.isEmpty()) "" else " Large files: $big."),
+                    if (ramMb > 700 || cached > 400) Level.WARN else Level.OK
+                )
+            )
+        } catch (e: Throwable) {
+        }
         // ---- Recent errors ----
 
         val day = System.currentTimeMillis() - DAY_MS

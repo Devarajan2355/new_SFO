@@ -9,6 +9,8 @@ import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.SweepGradient
+import android.os.Build
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.View
 import kotlin.math.abs
@@ -24,8 +26,18 @@ import kotlin.math.sin
  *   HANDS_FREE  three dots orbiting, amber
  *
  * setting | bubble animation = active (default: moves only while she listens, speaks or is hands-free)
- *                              full   (also breathes while idle, about 15 frames a second)
+ *                              full   (also breathes while idle)
  *                              off    (no motion)
+ *
+ * WHY THIS FILE CHANGED (phone slowing down after long use):
+ *   The bubble is a system overlay, so every frame it draws makes the phone's compositor redraw the
+ *   screen above whatever app you are using. Hands-free mode used to run it at 30 frames a second
+ *   for as long as hands-free was on (hours). Now:
+ *     - waiting quietly (idle, or hands-free listening for her name) draws only 10 frames a second,
+ *       at a calmer speed. Listening and speaking still run at 30.
+ *     - nothing is drawn while the bubble's window is not visible (screen off).
+ *     - when Battery saver is on, or the phone reports it is getting hot (Android 10 and up), the
+ *       bubble stops moving until things cool down. Colours still change, so you still see her state.
  *
  * Cheap on purpose: shaders are built once per size, nothing is allocated per frame, and when
  * nothing is moving no further frames are requested at all.
@@ -59,6 +71,15 @@ class OrbView(context: Context) : View(context) {
     private var cy = 0f
     private var r = 0f
 
+    // Battery saver / heat check, repeated every few seconds instead of every frame.
+    private val power: PowerManager? = try {
+        context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    } catch (e: Throwable) {
+        null
+    }
+    private var throttleCheckedAt = 0L
+    private var throttled = false
+
     private val cores = arrayOfNulls<Shader>(4)
     private val glows = arrayOfNulls<Shader>(4)
     private var ring1: SweepGradient? = null
@@ -89,10 +110,29 @@ class OrbView(context: Context) : View(context) {
         Mode.HANDS_FREE -> 0.3f
     }
 
+    // True when the phone wants less work from us: Battery saver, or it is getting warm.
+    private fun phoneWantsRest(): Boolean {
+
+        val p = power ?: return false
+
+        return try {
+            p.isPowerSaveMode ||
+                (Build.VERSION.SDK_INT >= 29 && p.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE)
+        } catch (e: Throwable) {
+            false
+        }
+    }
+
     /** A small press effect, called from the bubble's touch handler. */
     fun press(down: Boolean) {
         val s = if (down) 0.9f else 1f
         animate().scaleX(s).scaleY(s).setDuration(110).start()
+    }
+
+    // When the screen comes back, start drawing again (the frame loop stops while it is off).
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == View.VISIBLE) invalidate()
     }
 
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
@@ -127,13 +167,22 @@ class OrbView(context: Context) : View(context) {
         val idx = m.ordinal
         val tint = tintOf(m)
 
-        val live = when (anim) {
+        if (now - throttleCheckedAt > 3000L) {
+            throttleCheckedAt = now
+            throttled = phoneWantsRest()
+        }
+
+        val live = !throttled && when (anim) {
             "off" -> false
             "full" -> true
             else -> m != Mode.IDLE
         }
 
-        val tt = if (live) (now - t0) / 1000f else 0f
+        // Waiting quietly needs neither 30 frames a second nor fast motion.
+        val calm = m == Mode.IDLE || m == Mode.HANDS_FREE
+        val speed = if (calm) 0.35f else 1f
+
+        val tt = if (live) (now - t0) / 1000f * speed else 0f
 
         val target = energyOf(m)
         if (live) energy += (target - energy) * 0.12f else energy = target
@@ -267,10 +316,10 @@ class OrbView(context: Context) : View(context) {
 
         canvas.restore()
 
-        // ---- next frame: only if something is moving, and never faster than needed ----
-        if (live || easing || p < 1f) {
-            val gap = if (m == Mode.IDLE && p >= 1f && !easing) 66L else 33L
-            postInvalidateDelayed(gap)
+        // ---- next frame: only if something is moving, only while visible, and never faster than needed ----
+        if ((live || easing || p < 1f) && windowVisibility == View.VISIBLE) {
+            val quiet = calm && !easing && p >= 1f
+            postInvalidateDelayed(if (quiet) 100L else 33L)
         }
     }
 }

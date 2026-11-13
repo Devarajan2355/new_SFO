@@ -14,6 +14,7 @@ object Brain {
     private var lines: List<String> = emptyList()
     private var loaded = false
     private var rowsCache: List<Row>? = null
+    private var settingCache: Map<String, String>? = null
     private val mapCache = HashMap<String, Map<String, String>>()
 
     private val STARTER = """
@@ -57,12 +58,11 @@ nick | gpay = google pay
         val l = s.split("\n").map { it.removeSuffix("\r") }
         return if (l.isNotEmpty() && l.last().isEmpty()) l.dropLast(1) else l
     }
-
     private fun invalidate() {
         rowsCache = null
+        settingCache = null
         mapCache.clear()
     }
-
     // Replace the whole brain: update memory, then write atomically.
     private fun setLines(next: List<String>) {
         if (next == lines) return
@@ -151,11 +151,18 @@ nick | gpay = google pay
     @Synchronized
     fun items(type: String): List<String> =
         rows(type).map { if (it.right.isEmpty()) it.left else it.left + " = " + it.right }
-
     @Synchronized
-    fun setting(key: String, def: String): String =
-        rows("setting").firstOrNull { clean(it.left) == key }?.right?.takeIf { it.isNotBlank() } ?: def
-
+    fun setting(key: String, def: String): String {
+        // Built once per change of the Brain file. The first line for a key still wins, as before.
+        val m = settingCache ?: HashMap<String, String>().also { out ->
+            for (r in rows("setting")) {
+                val k = clean(r.left)
+                if (!out.containsKey(k)) out[k] = r.right
+            }
+            settingCache = out
+        }
+        return m[key]?.takeIf { it.isNotBlank() } ?: def
+    }
     // ------------------------------------------------------------------
     // Writing
     // ------------------------------------------------------------------

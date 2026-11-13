@@ -3525,10 +3525,12 @@ object KnowledgeStore {
             if (targetTokens.size < 2) {
                 return@runCatching null
             }
+
             var best: Entry? = null
             var bestScore = 0.0
             val maxAge = ageLimit(normalized)      // worked out once, not once per saved answer
             val nowMs = System.currentTimeMillis()
+
             for ((key, value) in prefs.all) {
                 if (!key.startsWith(Q_PREFIX)) continue
 
@@ -3543,7 +3545,9 @@ object KnowledgeStore {
                         T_PREFIX + id,
                         0L
                     )
+
                 if (answer.isBlank() || timestamp <= 0L || nowMs - timestamp > maxAge) continue
+
                 val storedTokens =
                     importantTokens(storedQuestion)
 
@@ -3585,7 +3589,8 @@ object KnowledgeStore {
                 // The slow answer check only runs for an entry that would actually win.
                 if (score >= 1.0 && coverage >= 0.66 && score > bestScore &&
                     WebSearch.isUsableAnswer(normalized, answer)
-                ) {                    bestScore = score
+                ) {
+                    bestScore = score
                     best = Entry(
                         storedQuestion,
                         answer,
@@ -3648,7 +3653,8 @@ object KnowledgeStore {
                 )
                 .apply()
 
-            trimCache(prefs)        }
+            trimCache(prefs)
+        }
     }
 
     private fun isFresh(
@@ -3678,6 +3684,7 @@ object KnowledgeStore {
 
         return System.currentTimeMillis() - timestamp <= maxAge
     }
+
     private const val MAX_ENTRIES = 300
 
     private fun ageLimit(question: String): Long {
@@ -3716,6 +3723,20 @@ object KnowledgeStore {
     }
 
     private fun idFor(value: String): String {
+        val digest =
+            MessageDigest.getInstance("SHA-256")
+                .digest(
+                    value.toByteArray(Charsets.UTF_8)
+                )
+
+        return Base64.encodeToString(
+            digest,
+            Base64.URL_SAFE or
+                Base64.NO_WRAP or
+                Base64.NO_PADDING
+        )
+    }
+
     private fun importantTokens(
         question: String
     ): Set<String> {
